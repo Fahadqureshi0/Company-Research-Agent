@@ -11,7 +11,15 @@ import {
 } from "framer-motion";
 import "./App.css";
 
-const API = "http://localhost:8000";
+// Default backend address. Set VITE_API_URL in Vercel (or a local .env file),
+// or change it any time in the page under "Backend settings".
+const DEFAULT_API = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+
+function cleanUrl(v) {
+  let u = v.trim().replace(/\/+$/, "");
+  if (u && !/^https?:\/\//i.test(u)) u = `https://${u}`;
+  return u;
+}
 const EXAMPLES = ["NVIDIA", "Microsoft", "Tesla", "Stripe", "OpenAI"];
 const TITLE = "Company Research Agent";
 
@@ -272,6 +280,9 @@ export default function App() {
   const [phIdx, setPhIdx] = useState(0);
   const [history, setHistory] = useState(() => load("reports", []));
   const [theme, setTheme] = useState(() => load("theme", "light"));
+  const [api, setApi] = useState(() => load("apiBase", DEFAULT_API));
+  const [apiDraft, setApiDraft] = useState(() => load("apiBase", DEFAULT_API));
+  const [conn, setConn] = useState("idle"); // idle | checking | ok | fail
   const abortRef = useRef(null);
   const jobRef = useRef(null);
   const feedRef = useRef(null);
@@ -285,6 +296,10 @@ export default function App() {
   useEffect(() => {
     save("reports", history);
   }, [history]);
+
+  useEffect(() => {
+    save("apiBase", api);
+  }, [api]);
 
   // Elapsed-time counter while a request is running
   useEffect(() => {
@@ -328,10 +343,12 @@ export default function App() {
     setCopied(false);
 
     function finish(url, id) {
+      // The backend returns a relative path like /download/abc123
+      const fullUrl = url.startsWith("http") ? url : `${api}${url}`;
       const entry = {
-        id: id || url,
+        id: id || fullUrl,
         company: target,
-        url,
+        url: fullUrl,
         date: new Date().toISOString(),
       };
       setResult(entry);
@@ -341,7 +358,7 @@ export default function App() {
     }
 
     try {
-      const r = await fetch(`${API}/research`, {
+      const r = await fetch(`${api}/research`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ company: target }),
@@ -357,11 +374,29 @@ export default function App() {
       }
 
       jobRef.current = data.job_id;
+      let fails = 0;
       for (;;) {
         await sleep(1000, signal);
-        const s = await fetch(`${API}/status/${data.job_id}`, { signal });
-        if (!s.ok) throw new Error(`Status check failed (${s.status}).`);
-        const job = await s.json();
+
+        let job;
+        try {
+          const s = await fetch(`${api}/status/${data.job_id}`, { signal });
+          if (s.status === 404) {
+            throw Object.assign(
+              new Error("The server restarted and lost this job. Please try again."),
+              { fatal: true }
+            );
+          }
+          if (!s.ok) throw new Error(`Status check failed (${s.status}).`);
+          job = await s.json();
+          fails = 0;
+        } catch (err) {
+          if (err.name === "AbortError" || err.fatal) throw err;
+          fails += 1; // tolerate a few failed checks in a row, then give up
+          if (fails >= 5) throw err;
+          continue;
+        }
+
         setEvents((prev) => (prev.length === job.events.length ? prev : job.events));
 
         if (job.status === "done") {
@@ -381,7 +416,7 @@ export default function App() {
       }
       setError(
         e.message === "Failed to fetch"
-          ? "Can't reach the backend at localhost:8000. Check that uvicorn is running."
+          ? `Can't reach the backend at ${api}. Check that it is running, or update the address under Backend settings.`
           : e.message
       );
       setStatus("error");
@@ -391,7 +426,7 @@ export default function App() {
   function cancel() {
     abortRef.current?.abort();
     if (jobRef.current) {
-      fetch(`${API}/cancel/${jobRef.current}`, { method: "POST" }).catch(() => {});
+      fetch(`${api}/cancel/${jobRef.current}`, { method: "POST" }).catch(() => {});
     }
   }
 
@@ -403,6 +438,30 @@ export default function App() {
   function pick(name) {
     setCompany(name);
     run(name);
+  }
+
+  async function testBackend(url) {
+    setConn("checking");
+    try {
+      const r = await fetch(`${url}/openapi.json`);
+      setConn(r.ok ? "ok" : "fail");
+    } catch {
+      setConn("fail");
+    }
+  }
+
+  function saveApi() {
+    const u = cleanUrl(apiDraft);
+    if (!u) return;
+    setApi(u);
+    setApiDraft(u);
+    testBackend(u);
+  }
+
+  function resetApi() {
+    setApi(DEFAULT_API);
+    setApiDraft(DEFAULT_API);
+    setConn("idle");
   }
 
   async function copyLink(url) {
@@ -701,6 +760,38 @@ export default function App() {
             </ul>
           )}
         </TiltCard>
+
+        <motion.div variants={item}>
+          <details className="settings">
+            <summary>Backend settings</summary>
+            <p className="hint tight">
+              Where the agent runs. Paste a new address here if you restart the
+              tunnel. It is remembered in this browser.
+            </p>
+            <div className="settings-row">
+              <input
+                value={apiDraft}
+                onChange={(e) => setApiDraft(e.target.value)}
+                placeholder="https://your-backend-address"
+                aria-label="Backend URL"
+                disabled={running}
+              />
+              <button type="button" onClick={saveApi} disabled={running || !apiDraft.trim()}>
+                Save and test
+              </button>
+              <button type="button" className="ghost" onClick={resetApi} disabled={running}>
+                Reset
+              </button>
+            </div>
+            <p className={`conn conn-${conn}`} aria-live="polite">
+              {conn === "checking" && "Checking..."}
+              {conn === "ok" && "Connected. The backend answered."}
+              {conn === "fail" &&
+                "Could not reach it. Check the address, and that the backend and tunnel are running."}
+              {conn === "idle" && `Currently using ${api}`}
+            </p>
+          </details>
+        </motion.div>
       </motion.div>
     </MotionConfig>
   );

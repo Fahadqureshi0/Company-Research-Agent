@@ -673,3 +673,59 @@ summary:focus-visible {
     transition: none !important;
   }
 }
+
+/* ---------- Backend settings ---------- */
+
+.settings {
+  margin-top: 22px;
+  font-size: 0.9rem;
+}
+
+.settings summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.settings-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.settings-row input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.settings-row input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.conn {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.conn-ok {
+  color: var(--ok);
+}
+
+.conn-fail {
+  color: var(--danger);
+}
+
+@media (max-width: 480px) {
+  .settings-row {
+    flex-direction: column;
+  }
+}

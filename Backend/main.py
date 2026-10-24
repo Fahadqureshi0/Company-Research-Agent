@@ -15,9 +15,19 @@ from agent import research, to_structured
 from pdf_builder import build_pdf
 
 app = FastAPI()
+
+ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://company-research-agent-sand.vercel.app",
+]
+# Optional: add more origins (comma separated) without editing the code
+extra = os.getenv("ALLOWED_ORIGINS", "")
+ORIGINS += [o.strip() for o in extra.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -59,7 +69,8 @@ def run_job(job_id: str, company: str):
         rid = uuid.uuid4().hex
         build_pdf(report, f"reports/{rid}.pdf")
         job["report_id"] = rid
-        job["download_url"] = f"http://localhost:8000/download/{rid}"
+        # relative path: the frontend adds its own API address in front
+        job["download_url"] = f"/download/{rid}"
         job["status"] = "done"
         emit("done", "Report ready")
     except Exception as e:
